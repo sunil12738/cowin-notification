@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+
+<body>
+    <script type="text/javascript">
+        function poll() {
+            const apiInterval = setInterval(() => {
+                fetch('https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/calendarByDistrict?district_id=664&date=12-05-2021').then((res) => {
+                    return res.json()
+                }).then((res) => {
+                    console.log(res)
+                    window.res = res
+                    const list = res && res.centers || []
+                    for(let i=0;i<list.length;++i) {
+                        const condition = list[i].name.toLowerCase().indexOf('gsvm') >= 0
+                            || (list[i].name.toLowerCase().indexOf('kalyanpur') >= 0 && list[i].name.toLowerCase().indexOf('44') < 0)
+                        if (condition) {
+                            console.log(JSON.stringify(list[i], 0, 4))
+                            const sessions = list[i].sessions
+                            sessions.forEach(element => {
+                                if(element.available_capacity > 0) {
+                                    playAudio()
+                                    window.alert(JSON.stringify(list[i]))
+                                    clearInterval(apiInterval)
+                                }
+                            });
+                        }
+                    }
+                })
+            }, 10000)
+        }
+
+        function playAudio() {
+            if(document.getElementById("audio")) document.getElementById("audio").play()
+        }
+        poll()
+    </script>
+    <audio controls id="audio">
+        <source src="./audio.mp3" type="audio/ogg">
+        Your browser does not support the audio element.
+      </audio>
+</body>
+
+</html>
