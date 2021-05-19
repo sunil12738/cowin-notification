@@ -8,5 +8,9 @@
   },
   "author": "",
   "license": "ISC",
-  "dependencies": {}
+  "dependencies": {
+    "prepend-file": "^2.0.0",
+    "prompt": "^1.1.0",
+    "sound-play": "^1.1.0"
+  }
 }

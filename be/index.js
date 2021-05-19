@@ -1,50 +1,49 @@
 const https = require('https');
-const fs = require('fs');
-const { exec } = require('child_process');
+const sound = require("sound-play");
+const prependFile = require('prepend-file');
+const getUserInputs = require('./prompter');
+const {getDate} = require('./utils');
+
 let slotFound = 0
+let playingAudio = false
+const baseUrl = 'https://cdn-api.co-vin.in/api/v2'
 
-function poll() {
-  https.get('https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/calendarByDistrict?district_id=664&date=12-05-2021', (resp) => {
-    let data = '';
+function poll(url) {
+  return new Promise((resolve, reject) => {
+    https.get((baseUrl + url), (resp) => {
+      let data = '';
 
-    // A chunk of data has been received.
-    resp.on('data', (chunk) => {
-      data += chunk;
+      // A chunk of data has been received.
+      resp.on('data', (chunk) => {
+        data += chunk;
+      });
+
+      // The whole response has been received. Print out the result.
+      resp.on('end', () => {
+        resolve(JSON.parse(data))
+        // processData(JSON.parse(data))
+        // console.log(JSON.parse(data).explanation);
+      });
+    }).on("error", (err) => {
+      console.log("Error: " + err.message);
     });
-
-    // The whole response has been received. Print out the result.
-    resp.on('end', () => {
-      processData(JSON.parse(data))
-      // console.log(JSON.parse(data).explanation);
-    });
-
-  }).on("error", (err) => {
-    console.log("Error: " + err.message);
-  });
+  })
 }
 
-function processData(obj) {
-  console.log(JSON.stringify(obj))
+function processData(obj, places, below45) {
+  // console.log(JSON.stringify(obj))
+  console.log('Processing data at ', getDate())
   const list = obj && obj.centers || []
   for (let i = 0; i < list.length; ++i) {
-    const conditionG = list[i].name.toLowerCase().indexOf('gsvm') >= 0
-    const conditionK = (list[i].name.toLowerCase().indexOf('kalyanpur') >= 0 && list[i].name.toLowerCase().indexOf('44') < 0)
-    || (list[i].name.toLowerCase().indexOf('iit kanpur') >= 0 && list[i].name.toLowerCase().indexOf('44') < 0)
-    slotSaver(conditionG, list[i], '/dataG.csv', '/slotG.csv')
+    const conditionK = places.some(place => {
+      return (
+        list[i].name.toLowerCase().indexOf(place) >= 0 &&
+        (
+          below45 ? list[i].name.indexOf('18') > 0 : list[i].name.indexOf('18') < 0
+        )
+      )
+    })
     slotSaver(conditionK, list[i], '/dataK.csv', '/slotK.csv')
-    // if (condition) {
-    //   const sessions = list[i].sessions
-    //   sessions.forEach(element => {
-    //     const data = `${new Date()},${element.date},${list[i].name},${element.available_capacity}\n`
-    //     console.log(data)
-    //     appendToFile(data, '/data.csv')
-    //     if (element.available_capacity > 0) {
-    //       appendToFile(data, '/slots.csv')
-    //       slotFound=1
-    //       // clearInterval(apiInterval)
-    //     }
-    //   });
-    // }
   }
 }
 
@@ -52,37 +51,78 @@ function slotSaver(condition, list, dataFile, slotFile){
   if (condition) {
     const sessions = list.sessions
     sessions.forEach(element => {
-      const data = `${new Date()},${element.date},${list.name},${element.available_capacity},${list.pincode}\n`
+      const data = `${getDate()}, ${element.date}, ${list.name}, ${element.available_capacity}, ${list.pincode}\n`
       appendToFile(data, dataFile)
       if (element.available_capacity > 0) {
-        console.log(data)
+        console.log('Logging', element)
         appendToFile(data, slotFile)
-        // slotFound=1
-        playAudio()
-        // clearInterval(apiInterval)
+        slotFound=1
       }
     });
+    if (slotFound) {
+      playAudio()
+      playingAudio = true
+    }
   }
 }
 
 function appendToFile(data, fileName) {
-  fs.appendFileSync(__dirname + fileName, data, function (err) {
-    if (err) throw err;
-    console.log('Saved!s');
-  });
+  prependFile.sync((__dirname + fileName), data)
 }
 
 function playAudio(){
-  exec('afplay ./audio.mp3')
+  if (playingAudio) {
+    return
+  }
+  sound.play('./audio.mp3');
+  setTimeout(() => {
+    playingAudio = false
+  }, 20000)
 }
 
-function start() {
-  const api = setInterval(() => {
-    poll()
-    if (slotFound) {
-      clearInterval(api)
-    }
-  }, 2000)
+async function startProgram() {
+  const {stateName, districtName, date, below45, places} = await getUserInputs()
+  const {states} = await poll('/admin/location/states')
+  const state = states.find(state => state.state_name.toLowerCase().indexOf(stateName.toLowerCase()) >= 0)
+  if (!state) {
+    console.log('Wrong state name. Valid list are ', JSON.stringify(states.map(({state_name}) => state_name)), null, 2)
+    process.exit(1)
+  }
+  const stateCode = state.state_id
+
+  const {districts} = await poll(`/admin/location/districts/${stateCode}`)
+  const district = districts.find(district => district.district_name.toLowerCase().indexOf(districtName.toLowerCase()) >= 0)
+  if (!district) {
+    console.log('Wrong district name')
+    process.exit(1)
+  }
+  const districtCode = district.district_id
+  startPolling({
+    districtCode,
+    date,
+    below45,
+    places
+  })
 }
 
-start();
+let pollId = null
+
+async function startPolling ({districtCode, date, below45, places}) {
+  // console.log('start polling')
+  try {
+    // const data = await poll(`/appointment/sessions/public/calendarByDistrict?district_id=${districtCode}&date=${date}`)
+    // processData(data, places, below45)
+    pollId = setInterval(async () => {
+        // if (slotFound) {
+        //   clearInterval(pollId)
+        // }
+        const data = await poll(`/appointment/sessions/public/calendarByDistrict?district_id=${districtCode}&date=${date}`)
+        processData(data, places, below45)
+      }, 10000)
+  } catch (error) {
+    console.log(error)
+    // process.exit(1)
+  }
+}
+
+startProgram();
